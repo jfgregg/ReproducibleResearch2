@@ -1,0 +1,202 @@
+---
+title: "PeerGradedAssessment2"
+author: "J Gregg"
+date: "30/05/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+library(gridExtra)
+library(lubridate)
+library(knitr)
+```
+
+Effects of adverse weather on health and the economy.
+====================================================
+
+### Synopsis
+
+The NOAA Storm Database has records on the impact of weather events since 1950. Events are classified into different types. There are inconsistencies in labelling a number of descriptors for type of event, I have therefore selected only data since January 2000 and relabelled events to match a single descriptor, e.g. TSTM WIND replaced with THUNDERSTORM WIND. Events have been ordered by total injuries and a table created showing this information, along with total fatalities. I have found the event type which has caused the most injuries and fatalities this millenium. A time series plot of the five higest injury causing event types has been created to show frequency as well as severity of these events. 
+
+To assess economic impact values for property and crop damage were combined and a plot created to show the worst five events by both total cost and mean cost per event in the last decade.
+
+### Data Processing
+
+**Loading Data**
+
+Data was loaded in into R from the zipped csv file found at the following link https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2
+
+```{r, cache = TRUE}
+
+url = "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+temp <- "./data.zip"
+download.file(url, temp, mode = "wb")
+data <- read.csv(temp)
+
+```
+
+Checking the unique event types in R reveals that there are considerably more event types listed than the 48 detailed by the National Weather Service [Storm Data Documentation](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf)
+
+```{r}
+length(unique(data$EVTYPE))
+```
+
+**Selecting Recent Data**
+
+Data was instead selected since the year 2000
+
+```{r, cache = TRUE}
+recent <- as.Date("2000-01-01")
+recent_events <- filter(data, strptime(BGN_DATE, "%m/%d/%Y %T") > recent)
+```
+
+A new variable of type date format was created based on the BGN_DATE variable in the table. 
+```{r, cache = TRUE}
+Date <-  as.Date(strptime(recent_events$BGN_DATE, "%m/%d/%Y %T"))
+```
+
+A new variable called Type merges some categories into single identifiers. 
+```{r, cache = TRUE}
+Type <- recent_events$EVTYPE
+
+for (i in 1:length(Type)){
+  if(grepl("MARINE", Type[i])==TRUE){
+    if (grepl("TSTM|THUNDERSTORM", Type[i])==TRUE){
+      Type[i] <- "MARINE THUNDERSTORM WIND"
+    }
+  }
+  else if(grepl("TSTM|THUNDERSTORM", Type[i])==TRUE){
+    Type[i] <- "THUNDERSTORM WIND"
+  }
+  else if(grepl("SURF", Type[i])==TRUE){
+    Type[i] <- "HIGH SURF"
+  }
+  else if(grepl("RIP", Type[i])==TRUE){
+    Type[i] <- "RIP CURRENTS"
+  }
+  else if(grepl("WINTER", Type[i])==TRUE){
+    Type[i] <- "WINTER WEATHER"
+  }
+  else if(grepl("HURRICANE", Type[i])==TRUE){
+    Type[i] <- "HURRICANE"
+  }
+}
+  
+
+```
+
+**Calculating Costs**
+
+Economic cost was calculated as a single variable by combining property and crop damage and using the appropriate multiplier (K,M,B) to convert all values to 100's of dollars.
+
+```{r, cache = TRUE}
+cost <- NULL
+for (i in 1:nrow(recent_events)){
+  if(recent_events$PROPDMGEXP[i] == "K"){
+    cost[i] <- recent_events$PROPDMG[i] 
+  }
+  else if(recent_events$PROPDMGEXP[i] == "M"){
+    cost[i] <- recent_events$PROPDMG[i]*1000 
+  }  
+  else if(recent_events$PROPDMGEXP[i] == "B"){
+    cost[i] <- recent_events$PROPDMG[i]*1000000 
+  }  
+  else{
+    cost[i] <- recent_events$CROPDMG[i]/1000 
+  }
+
+  if(recent_events$CROPDMGEXP[i] == "K"){
+    cost[i] <- cost[i] + recent_events$CROPDMG[i] 
+  }
+  else if(recent_events$CROPDMGEXP[i] == "M"){
+    cost[i] <- cost[i] + recent_events$CROPDMG[i]*1000 
+  }  
+  else if(recent_events$CROPDMGEXP[i] == "B"){
+    cost[i] <- cost[i] + recent_events$CROPDMG[i]*1000000 
+  }  
+  else{
+    cost[i] <- cost[i] +recent_events$CROPDMG[i]/1000 
+  }
+    
+}
+
+```
+
+Now I selected event type data with fatality and injury data and combined with cost and Date information previously calculated
+
+**Creating Data Frame for Analysis**
+
+```{r, cache = TRUE}
+impact <- select(recent_events, "Fatalities" = "FATALITIES", "Injuries" ="INJURIES")
+impact <- cbind(Type, impact, Date, cost)
+bytype <- group_by(impact, Type)
+```
+
+
+### Results
+
+#### Which event type is most harmful to health?
+
+In order to understand the most costly events in terms of injury total injuries were calculated by event type and the tem nost harmful events can be seen in the tables below, with details on total injuries and total deaths from these events.
+
+```{r}
+
+totals <- summarise(bytype, Total_Injuries = sum(Injuries, na.rm = TRUE), Total_Deaths= sum(Fatalities, na.rm = TRUE))
+totals_inj <- select(totals, Type, Total_Injuries, Total_Deaths)
+totals_inj <- arrange(totals_inj, desc(Total_Injuries))
+
+top_20 <- top_n(totals_inj, 20, Total_Injuries)
+kable(top_20, caption = "Worst twenty event types by total injuries", col.names = c("Type of Event", "Total Injuries", "Total Deaths"))
+```
+
+
+```{r injuries}
+injuries <- totals_inj[1,1]
+```
+
+```{r deaths}
+totals_death <- arrange(totals_inj, desc(Total_Deaths))
+deaths <- totals_death[1,1]
+```
+
+In the last ten years most injuries in the US have been caused by `r injuries` and most deaths have been caused by `r deaths`
+
+Deaths and injuries could be high due to frequency *or* severity of events, it would be possible to find an average number of fatalities and injuries for each event, instead for the top 5 most injury causing events I have plotted all occurences since January 2000 of these events, with number of injuries shown. 
+
+```{r}
+top5 <- top_n(totals_inj,5, Total_Injuries)
+temp <- bytype$Type %in% top5$Type
+bigevents <- bytype[temp == TRUE,]
+p <- ggplot(bigevents, aes(x=Date, y=Injuries)) + geom_point(colour = "blue")
+p + facet_grid(row = vars(Type))
+
+```
+
+
+#### Which event type has the biggest economic impact?
+
+The graphs below show the five worst events for total damage since January 2000 (in billions of dollars) and mean damage per occurence (in millions of dollars)
+
+```{r}
+
+totals_cost <- summarise(bytype, "Total_Cost" = (sum(cost, na.rm = TRUE))/1000000, "Mean_Cost" = (mean(cost, na.rm = TRUE))/1000)
+totals_cost <- arrange(totals_cost, desc(Mean_Cost))
+totals_cost
+
+avg_cost <- ggplot(totals_cost[1:5,], aes(x=reorder(Type, -Mean_Cost), y=Mean_Cost, fill=reorder(Type, -Mean_Cost))) +  geom_bar(stat="identity") + theme(axis.text.x=element_blank(),axis.ticks.x=element_blank())
+avg_cost <- avg_cost + labs(x = " ", y = "Mean Cost million dollars", fill = "Type")
+
+totals_cost <- arrange(totals_cost, desc(Total_Cost))
+
+tot_cost <- ggplot(totals_cost[1:5,], aes(x=reorder(Type, -Total_Cost), y=Total_Cost, fill=reorder(Type, -Total_Cost))) +  geom_bar(stat="identity") + theme(axis.text.x=element_blank(),axis.ticks.x=element_blank())
+tot_cost <- tot_cost + labs(x = " ", y = "Total Cost bilion dollars", fill = "Type")
+
+grid.arrange(tot_cost,avg_cost)
+```
+
+
+
+
